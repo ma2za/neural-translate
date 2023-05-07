@@ -1,1 +1,1 @@
-# neural-translate
+# Neural Translate
