@@ -1,0 +1,7 @@
+en:
+  de:
+    model:
+      "facebook/wmt19-en-de"
+  es:
+    model:
+      "Helsinki-NLP/opus-mt-en-es"

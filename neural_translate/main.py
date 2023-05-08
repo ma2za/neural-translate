@@ -1,3 +1,3 @@
 from src.translate import translate
 
-print(translate("Good morning", src="end", dst="de"))
+print(translate("My name is Wolfgang and I live in Berlin", src="en", dst="de"))

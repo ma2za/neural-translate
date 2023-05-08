@@ -1,3 +1,7 @@
+import yaml
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+
+
 def load_model(src: str, dst: str):
     """
 
@@ -5,13 +9,19 @@ def load_model(src: str, dst: str):
     :param dst:
     :return:
     """
-    
-    if src == "en" and dst == "de":
-        from transformers import FSMTForConditionalGeneration, FSMTTokenizer
-        mname = "facebook/wmt19-en-de"
-        tokenizer = FSMTTokenizer.from_pretrained(mname)
-        model = FSMTForConditionalGeneration.from_pretrained(mname)
-    else:
+
+    with open("config/config.yml", "r") as stream:
+        try:
+            models = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            raise exc
+
+    model_name = models.get(src, {}).get(dst, {}).get("model")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+
+    if model_name is None:
         raise Exception(f"Language pair {src} to {dst} not available!")
     return model, tokenizer
 
