@@ -1,5 +1,7 @@
+from typing import Union, List
+
+import fasttext
 import yaml
-from langdetect import detect as detect_language
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
 
@@ -27,19 +29,45 @@ def load_model(src: str, tgt: str):
     return model, tokenizer
 
 
-def translate(sentence: str, *, src: str = None, tgt: str) -> str:
+def _language_detection(text: List[str]) -> List[str]:
     """
 
-    :param sentence:
+    :param text:
+    :return:
+    """
+
+    pretrained_lang_model = "data/lid.176.bin"
+    try:
+        lang_model = fasttext.load_model(pretrained_lang_model)
+    except ValueError:
+        raise Exception("The fasttext language detection model is not present!")
+    src = lang_model.predict(text, k=1)
+    src = [lang[0].replace("__label__", "") for lang in src[0]]
+    return src
+
+
+def translate(text: Union[str, List[str]], *,
+              src: Union[str, List[str]] = None, tgt: str) -> Union[str, List[str]]:
+    """
+
+    :param text:
     :param src:
     :param tgt:
     :return:
     """
+    if isinstance(text, str):
+        text = [text]
 
     if src is None:
-        src = detect_language(sentence)
-    model, tokenizer = load_model(src, tgt)
-    input_ids = tokenizer.encode(sentence, return_tensors="pt")
-    outputs = model.generate(input_ids)
-    decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return decoded
+        src = _language_detection(text)
+
+    # TODO group the sentences with the same language
+    output = []
+    for src_lang, sentence in zip(src, text):
+        model, tokenizer = load_model(src_lang, tgt)
+        input_ids = tokenizer.encode(sentence, return_tensors="pt")
+        # TODO break long sentences
+        outputs = model.generate(input_ids)
+        decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        output.append(decoded)
+    return output[0] if len(output) == 1 else output

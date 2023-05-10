@@ -5,3 +5,10 @@ en:
   es:
     model:
       "Helsinki-NLP/opus-mt-en-es"
+  fr:
+    model:
+      "Helsinki-NLP/opus-mt-en-fr"
+it:
+  en:
+    model:
+      "Helsinki-NLP/opus-mt-it-en"
