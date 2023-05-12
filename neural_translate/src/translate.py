@@ -61,13 +61,21 @@ def translate(text: Union[str, List[str]], *,
     if src is None:
         src = _language_detection(text)
 
-    # TODO group the sentences with the same language
-    output = []
+    # TODO optimize grouping
+    inputs = {}
     for src_lang, sentence in zip(src, text):
+        sentence_list = inputs.get(src_lang, [])
+        sentence_list.append(sentence)
+        inputs[src_lang] = sentence_list
+
+    output = []
+    for src_lang, sentences in inputs.items():
         model, tokenizer = load_model(src_lang, tgt)
-        input_ids = tokenizer.encode(sentence, return_tensors="pt")
+
         # TODO break long sentences
+        input_ids = tokenizer(sentences, padding=True, truncation=False,
+                              return_attention_mask=False, return_tensors="pt").get("input_ids")
         outputs = model.generate(input_ids)
-        decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        output.append(decoded)
+        decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        output.extend(decoded)
     return output[0] if len(output) == 1 else output

@@ -12,3 +12,6 @@ it:
   en:
     model:
       "Helsinki-NLP/opus-mt-it-en"
+  fr:
+    model:
+      "Helsinki-NLP/opus-mt-it-fr"
