@@ -1,6 +1,8 @@
+import os.path
 from typing import Union, List
 
 import fasttext
+import requests
 import yaml
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
@@ -13,7 +15,9 @@ def load_model(src: str, tgt: str):
     :return:
     """
 
-    with open("config/config.yml", "r") as stream:
+    # TODO handle config files
+
+    with open("config/language_pairs.yml", "r") as stream:
         try:
             models = yaml.safe_load(stream)
         except yaml.YAMLError as exc:
@@ -36,7 +40,13 @@ def _language_detection(text: List[str]) -> List[str]:
     :return:
     """
 
-    pretrained_lang_model = "data/lid.176.bin"
+    # TODO move to cache directory
+    pretrained_lang_model = "config/lid.176.bin"
+    if not os.path.exists(pretrained_lang_model):
+        resp = requests.get("https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin")
+        with open(pretrained_lang_model, "wb") as f:
+            f.write(resp.content)
+
     try:
         lang_model = fasttext.load_model(pretrained_lang_model)
     except ValueError:

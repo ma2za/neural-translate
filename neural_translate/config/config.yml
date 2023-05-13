@@ -1,17 +1,4 @@
-en:
-  de:
-    model:
-      "facebook/wmt19-en-de"
-  es:
-    model:
-      "Helsinki-NLP/opus-mt-en-es"
-  fr:
-    model:
-      "Helsinki-NLP/opus-mt-en-fr"
-it:
-  en:
-    model:
-      "Helsinki-NLP/opus-mt-it-en"
-  fr:
-    model:
-      "Helsinki-NLP/opus-mt-it-fr"
+fasttext:
+  "data/lid.176.bin"
+models:
+  "config/language_pairs.yml"
