@@ -8,6 +8,11 @@ import requests
 import yaml
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 
+DEFAULT_TRANSLATE_CACHE = os.path.expanduser("~/.cache/neural_translate")
+
+if not os.path.isdir(DEFAULT_TRANSLATE_CACHE):
+    os.makedirs(DEFAULT_TRANSLATE_CACHE, exist_ok=True)
+
 
 def load_model(src: str, tgt: str):
     """
@@ -44,15 +49,18 @@ def _language_detection(text: List[str]) -> List[str]:
     :return:
     """
 
-    # TODO move to cache directory
-    pretrained_lang_model = "config/lid.176.bin"
-    if not os.path.exists(pretrained_lang_model):
+    fasttext_path = os.path.join(DEFAULT_TRANSLATE_CACHE, "fasttext")
+    if not os.path.isdir(DEFAULT_TRANSLATE_CACHE):
+        os.makedirs(DEFAULT_TRANSLATE_CACHE, exist_ok=True)
+
+    fasttext_model = os.path.join(fasttext_path, "lid.176.bin")
+    if not os.path.exists(fasttext_model):
         resp = requests.get("https://dl.fbaipublicfiles.com/fasttext/supervised-models/lid.176.bin")
-        with open(pretrained_lang_model, "wb") as f:
+        with open(fasttext_model, "wb") as f:
             f.write(resp.content)
 
     try:
-        lang_model = fasttext.load_model(pretrained_lang_model)
+        lang_model = fasttext.load_model(fasttext_model)
     except ValueError:
         raise Exception("The fasttext language detection model is not present!")
     text = [t.replace("\n", " ") for t in text]

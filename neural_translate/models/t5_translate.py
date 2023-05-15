@@ -3,27 +3,18 @@ from functools import partial
 
 import numpy as np
 import torch
-import wandb
 from datasets import load_dataset, Dataset
 from evaluate import evaluator
-from torch import autocast
-from torch.cuda.amp import GradScaler
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
-from tqdm.notebook import tqdm
-from transformers import DataCollatorForSeq2Seq, Seq2SeqTrainer
-from transformers import Seq2SeqTrainingArguments
+from tqdm import tqdm
+from transformers import DataCollatorForSeq2Seq
 from transformers import T5TokenizerFast, T5ForConditionalGeneration
 
 torch.manual_seed(0)
 random.seed(0)
 np.random.seed(0)
-
-# Commented out IPython magic to ensure Python compatibility.
-# %env WANDB_PROJECT=t5_translate_en_it
-
-wandb.login()
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -39,19 +30,28 @@ def load_opus_dataset(src, tgt, tokenizer):
     dataset["train"] = Dataset.from_dict(dataset["train"][int(len(dataset["train"]) / 10):],
                                          features=dataset["train"].features)
 
-    def tokenization(sample):
-        # TODO do not truncate validation
-        # TODO add truncated tokens as new samples
-        model_inputs = tokenizer(sample["translation"]["en"], padding=True,
-                                 truncation=True, max_length=100)
+    def tokenization(sample, truncation=False, max_length=None):
+        model_inputs = tokenizer(sample["translation"]["en"],
+                                 padding=False,
+                                 truncation=truncation,
+                                 max_length=max_length)
 
-        labels = tokenizer(text_target=sample["translation"]["it"], padding=True,
-                           truncation=True, max_length=100)
+        labels = tokenizer(text_target=sample["translation"]["it"],
+                           padding=False,
+                           truncation=truncation,
+                           max_length=max_length)
 
         model_inputs["labels"] = labels["input_ids"]
         return model_inputs
 
-    dataset = dataset.map(tokenization, batched=False, batch_size=None, remove_columns=["translation"])
+    dataset["train"] = dataset["train"].map(partial(tokenization, truncation=True,
+                                                    max_length=100), batched=False,
+                                            batch_size=None,
+                                            remove_columns=["translation"])
+    dataset["validation"] = dataset["validation"].map(partial(tokenization, truncation=True,
+                                                              max_length=512),
+                                                      batched=False, batch_size=None,
+                                                      remove_columns=["translation"])
 
     return dataset
 
@@ -92,16 +92,17 @@ model = T5ForConditionalGeneration.from_pretrained("t5-base").to(DEVICE)
 dataset = load_opus_dataset("en", "it", tokenizer)
 
 config = {
-    "lr": 5e-05,
-    "epochs": 25,
-    "batch_size": 32,
+    "lr": 1e-05,
+    "epochs": 50,
+    "batch_size": 4,
     "warmup_ratio": 0.2
 }
 
 data_collator = DataCollatorForSeq2Seq(
     tokenizer,
     model=model,
-    label_pad_token_id=tokenizer.pad_token_id
+    label_pad_token_id=-100,
+    padding=True
 )
 
 train_loader = DataLoader(
@@ -110,10 +111,20 @@ train_loader = DataLoader(
     collate_fn=data_collator,
     drop_last=False,
     num_workers=0,
+    shuffle=True,
     pin_memory=True
 )
 
-optimizer = AdamW(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-08)
+valid_loader = DataLoader(
+    dataset["validation"],
+    batch_size=4,
+    collate_fn=data_collator,
+    drop_last=False,
+    num_workers=0,
+    pin_memory=True
+)
+
+optimizer = AdamW(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-08, weight_decay=0.01)
 
 num_training_steps = float(len(train_loader) * config["epochs"])
 
@@ -127,41 +138,45 @@ def lr_lambda(x: float, warmup: float, total: float):
 lr_scheduler = LambdaLR(optimizer, partial(lr_lambda, warmup=num_warmup_steps,
                                            total=num_training_steps))
 
-scaler = GradScaler()
 
-trainer = Seq2SeqTrainer(
-    model=model,
-    args=Seq2SeqTrainingArguments(output_dir="dummy_dir"),
-    eval_dataset=dataset["validation"],
-    data_collator=data_collator,
-)
+def evaluation(model, dataloader):
+    model.eval()
+    total_loss = 0
+    total_samples = 0
+    with torch.no_grad():
+        for step, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
+            inputs = {k: v.to(DEVICE) for k, v in batch.items()}
+            outputs = model(**inputs)
+            total_samples += len(batch["labels"])
+            total_loss += outputs.loss.detach().cpu() * len(batch["labels"])
+    return total_loss / total_samples
 
 
-def train_epoch(model, optimizer, scaler, lr_scheduler, train_loader):
+def train_epoch(model, optimizer, lr_scheduler, train_loader):
     model.train()
     for step, inputs in tqdm(enumerate(train_loader), total=len(train_loader)):
         inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
-        with autocast(device_type='cuda', dtype=torch.float16):
-            outputs = model(**inputs)
+        outputs = model(**inputs)
         # torch.nn.utils.clip_grad_norm_(model.parameters(), 1)
 
-        scaler.scale(outputs.loss).backward()
-        scaler.step(optimizer)
-        scaler.update()
         lr_scheduler.step()
 
         model.zero_grad()
     return outputs.loss.detach().cpu().item(), lr_scheduler.get_last_lr()
 
 
-wandb.init(project="t5_translate_en_it", config=config)
-
+best_loss = 100
 model.zero_grad()
 for epoch in range(config["epochs"]):
-    train_loss, last_lr = train_epoch(model, optimizer, scaler, lr_scheduler, train_loader)
-    eval_results = trainer.evaluate()
-    log_dict = {"eval/loss": eval_results['eval_loss'],
-                "train/loss": train_loss}
-    print(log_dict)
-    wandb.log(log_dict)
-wandb.finish()
+    train_loss, last_lr = train_epoch(model, optimizer, lr_scheduler, train_loader)
+    eval_loss = evaluation(model, valid_loader)
+
+    if eval_loss < best_loss:
+        best_loss = eval_loss
+        torch.save(model.state_dict(), "pytorch_model.bin")
+
+    log_dict = {"eval/loss": eval_loss.item(), "train/loss": train_loss}
+    print(f"EPOCH: {epoch}, {log_dict}")
+
+model_state = torch.load("pytorch_model.bin")
+model.load_state_dict(model_state)
