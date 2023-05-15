@@ -8,6 +8,9 @@ en:
   fr:
     model:
       "Helsinki-NLP/opus-mt-en-fr"
+  it:
+    model:
+      "Helsinki-NLP/opus-mt-en-it"
 it:
   en:
     model:

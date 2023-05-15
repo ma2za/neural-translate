@@ -1,4 +1,6 @@
-import os.path
+import itertools
+import os
+import textwrap
 from typing import Union, List
 
 import fasttext
@@ -24,12 +26,14 @@ def load_model(src: str, tgt: str):
             raise exc
 
     model_name = models.get(src, {}).get(tgt, {}).get("model")
+
+    if model_name is None:
+        raise Exception(f"Language pair {src} to {tgt} not available!")
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
 
-    if model_name is None:
-        raise Exception(f"Language pair {src} to {tgt} not available!")
     return model, tokenizer
 
 
@@ -51,6 +55,7 @@ def _language_detection(text: List[str]) -> List[str]:
         lang_model = fasttext.load_model(pretrained_lang_model)
     except ValueError:
         raise Exception("The fasttext language detection model is not present!")
+    text = [t.replace("\n", " ") for t in text]
     src = lang_model.predict(text, k=1)
     src = [lang[0].replace("__label__", "") for lang in src[0]]
     return src
@@ -82,10 +87,18 @@ def translate(text: Union[str, List[str]], *,
     for src_lang, sentences in inputs.items():
         model, tokenizer = load_model(src_lang, tgt)
 
-        # TODO break long sentences
-        input_ids = tokenizer(sentences, padding=True, truncation=False,
+        # TODO check textwrap breaks
+        sentences_dict = {}
+        for i, sentence in enumerate(sentences):
+            sentences_dict[i] = textwrap.wrap(sentence, 300) if len(sentence) > 300 else [sentence]
+        inputs = list(itertools.chain.from_iterable(list(sentences_dict.values())))
+        input_ids = tokenizer(inputs, padding=True, truncation=False,
                               return_attention_mask=False, return_tensors="pt").get("input_ids")
         outputs = model.generate(input_ids)
         decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        output.extend(decoded)
+
+        j = 0
+        for k, v in sentences_dict.items():
+            output.append(" ".join(decoded[j:j + len(v)]))
+            j += len(v)
     return output[0] if len(output) == 1 else output
